@@ -2,12 +2,14 @@ import pkg from 'pg';
 const { Pool } = pkg;
 
 const pool = new Pool({
-  user: 'postgres',          // your PostgreSQL username
-  host: 'localhost',         // database host
-  database: 'nijal',     // your database name
-  password: 'Sadu2006$', // your password here
-  port: 5432,                // your port
+  user: 'postgres',
+  host: 'localhost',
+  database: 'nijaltrade',
+  password: 'Sadu2006$', // your password
+  port: 5432,
 });
 
-pool.query('SET search_path TO "shippingBill"'); 
+// set correct schema
+pool.query('SET search_path TO public');
+
 export default pool;
