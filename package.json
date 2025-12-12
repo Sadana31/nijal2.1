@@ -10,7 +10,11 @@
     "start:all": "concurrently \"npm run dev\" \"node backend/server.js\""
   },
   "dependencies": {
+<<<<<<< HEAD
     "next": "^15.5.9",
+=======
+    "next": "15.5.9",
+>>>>>>> 3bee6b7e72ac5dadea81c12d25cd138a897bf496
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },
