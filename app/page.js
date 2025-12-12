@@ -177,12 +177,13 @@
     }, [remittanceData]);
 
     const filteredData = useMemo(() => {
-      let res = remittanceData.filter((rem) => remBankFilter === "All" || rem.bankName === remBankFilter);
-      if (activeRemFilter !== "All") {
-        res = res.filter((rem) => getRemittanceStatus(rem) === activeRemFilter);
-      }
-      return res;
-    }, [remittanceData, remBankFilter, activeRemFilter]);
+  let res = remittanceData.filter((rem) => remBankFilter === "All" || rem.bankName === remBankFilter);
+  if (activeRemFilter !== "All") {
+    res = res.filter((rem) => getRemittanceStatus(rem) === activeRemFilter);
+  }
+  return res;
+}, [remittanceData, remBankFilter, activeRemFilter, getRemittanceStatus]);
+
 
     const displayedStatusCounts = useMemo(() => {
       const counts = { "All": 0, "Outstanding": 0, "Unutilized": 0, "Part utilized": 0, "Utilized": 0 };
@@ -193,7 +194,8 @@
           if (counts[status] !== undefined) counts[status]++;
       });
       return counts;
-    }, [remittanceData, remBankFilter]);
+    }, [remittanceData, remBankFilter, getRemittanceStatus]);
+
 
     // --- HANDLERS ---
     
@@ -844,7 +846,7 @@ const fetchRemittances = async () => {
                 </button>
               </div>
               <div className="p-8 text-center text-gray-400 text-sm">
-                No invoices mapped. Click "Fetch Invoices" to begin.
+                No invoices mapped. Click Fetch Invoices to begin.
               </div>
             </div>
           </div>
