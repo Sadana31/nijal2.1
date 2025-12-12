@@ -653,7 +653,7 @@ const fetchRemittances = async () => {
                 value={iciciUploadJsonInput}
                 onChange={(e) => setIciciUploadJsonInput(e.target.value)}
                 className="w-full h-64 border border-gray-300 text-black rounded-lg p-3 font-mono text-xs focus:ring-2 focus:ring-orange-500 outline-none"
-                placeholder='{ "AssignmentDetails": ... }'
+                placeholder='{ &quot;AssignmentDetails&quot;: ... }'
               ></textarea>
               <div className="mt-4 flex justify-end gap-3">
                 <button onClick={() => setIsICICIUploadModalOpen(false)} className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
