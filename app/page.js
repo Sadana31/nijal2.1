@@ -281,7 +281,7 @@ const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
 const fetchRemittances = async () => {
   setIsLoading(true);
   try {
-    const response = await fetch("http://localhost:5000/api/remittances");
+    const response = await fetch("https://nijal2-1.onrender.com/api/remittances");
     const data = await response.json();
 
     // SAFETY CHECK: Ensure data is actually an array before using it
@@ -331,7 +331,7 @@ const fetchRemittances = async () => {
     setIsLoading(true);
     try {
       // 1. Send standardized data to your new endpoint
-      const response = await fetch('http://localhost:5000/api/remittances/upload', {
+      const response = await fetch('https://nijal2-1.onrender.com/api/remittances/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ remittances: normalizedData }),

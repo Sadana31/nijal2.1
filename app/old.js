@@ -1301,7 +1301,7 @@
   //   );
 
   //   useEffect(() => {
-  //     fetch("http://localhost:5000/api/shippingbills")
+  //     fetch("https://nijal2-1.onrender.com/api/shippingbills")
   //       .then((res) => res.json())
   //       .then((data) => {
   //         setBills(data);
