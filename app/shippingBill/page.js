@@ -1479,7 +1479,7 @@ export default function ShippingBillsPage() {
         setIsLoading(true);
 
         // 👇 UPDATE THIS URL TO YOUR REAL API
-        const response = await fetch("http://localhost:5000/api/shippingBills");
+        const response = await fetch("https://nijal2-1.onrender.com/api/shippingBills");
 
         if (!response.ok) throw new Error("Failed to fetch data");
 
