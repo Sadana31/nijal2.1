@@ -105,8 +105,31 @@
     const [updateMessage, setUpdateMessage] = useState("");
     
     // For Settlement Modal
-    const [availableInvoices, setAvailableInvoices] = useState([]);
-    const [selectedFetchInvoices, setSelectedFetchInvoices] = useState({});
+    // --- STATE FOR SETTLEMENT ---
+// This holds the invoices the user picked in the Fetch Modal
+const [selectedInvoices, setSelectedInvoices] = useState([]); 
+
+// --- HANDLERS ---
+
+const handleOpenSettleModal = (rem) => {
+  setCurrentRemittance(rem);
+  setSelectedInvoices([]); // Reset previous selections
+  setIsSettleModalOpen(true);
+  setIsRemittanceDetailModalOpen(false);
+};
+
+// When user clicks "Fetch Invoices" inside Settle Modal
+const handleOpenFetchInvoiceModal = () => {
+  setIsFetchInvoiceModalOpen(true); 
+  // We don't fetch here anymore. The Modal will fetch its own data.
+};
+
+// When user clicks "Add Selected" inside Fetch Modal
+const handleAddInvoices = (invoices) => {
+  setSelectedInvoices(invoices); // Save them to state
+  setIsFetchInvoiceModalOpen(false); // Close the top modal
+  // The Settle Modal is still open underneath and will now show these invoices
+};
 
     // --- INITIAL FETCH (Simulated) ---
     useEffect(() => {
@@ -244,33 +267,10 @@ const paginatedData = useMemo(() => {
 
 const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
 
-    const handleOpenSettleModal = (rem) => {
-      setCurrentRemittance(rem);
-      setIsSettleModalOpen(true);
-      setIsRemittanceDetailModalOpen(false);
-      setAvailableInvoices([]); 
-      setSelectedFetchInvoices({});
-    };
-
-    const handleSettleSubmit = (globalData, settlements) => {
-      // In a real app, here you would calculate new bills structure and setBills
-      setUpdateMessage(`Successfully settled remittance: ${currentRemittance?.remRef}`);
-      setIsSettleModalOpen(false);
-    };
 
     useEffect(() => {
   setCurrentPage(1);
 }, [activeRemFilter, remBankFilter]);
-
-
-    const handleOpenFetchInvoiceModal = () => {
-      const mockInvoices = [
-        { invoiceNo: "INV-001", shippingBillNo: "SB-100", outstanding: 5000, currency: "USD" },
-        { invoiceNo: "INV-002", shippingBillNo: "SB-101", outstanding: 2500, currency: "USD" }
-      ];
-      setAvailableInvoices(mockInvoices);
-      setIsFetchInvoiceModalOpen(true);
-    };
 
     // Add this state locally if not passed from parent
     const [remittances, setRemittances] = useState([]);
@@ -740,103 +740,316 @@ const fetchRemittances = async () => {
         )}
 
         {/* 4. Settle Modal - FIXED: accepting missing props to prevent crash */}
-        {isSettleModalOpen && currentRemittance && (
-          <SettleRemittanceModal 
-            remittance={currentRemittance} 
-            onClose={() => setIsSettleModalOpen(false)} 
-            onSubmit={handleSettleSubmit}
-            onOpenFetchInvoiceModal={handleOpenFetchInvoiceModal} // Passing the handler
-          />
-        )}
+        {/* 4. Settle Modal */}
+      {isSettleModalOpen && currentRemittance && (
+        <SettleRemittanceModal 
+          remittance={currentRemittance} 
+          selectedInvoices={selectedInvoices}  // <--- PASS DATA HERE
+          onClose={() => setIsSettleModalOpen(false)} 
+          onSubmit={handleSettleSubmit}
+          onOpenFetchInvoiceModal={handleOpenFetchInvoiceModal} 
+        />
+      )}
 
-        {/* 5. Fetch Invoices Modal */}
-        {isFetchInvoiceModalOpen && (
-          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-3xl rounded-xl shadow-2xl overflow-hidden">
-              <div className="px-6 py-4 border-b flex justify-between items-center">
-                <h3 className="text-lg font-bold text-gray-800">Select Invoices</h3>
-                <button onClick={() => setIsFetchInvoiceModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
-              </div>
-              <div className="p-0 max-h-[60vh] overflow-y-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-gray-50 text-xs text-gray-500 uppercase sticky top-0">
-                    <tr>
-                      <th className="px-6 py-3 w-10"><input type="checkbox" /></th>
-                      <th className="px-6 py-3">Invoice No</th>
-                      <th className="px-6 py-3">SB Number</th>
-                      <th className="px-6 py-3 text-right">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {availableInvoices.map((inv, idx) => (
-                      <tr key={idx} className="hover:bg-blue-50 transition-colors cursor-pointer">
-                        <td className="px-6 py-3"><input type="checkbox" /></td>
-                        <td className="px-6 py-3 font-medium text-gray-900">{inv.invoiceNo}</td>
-                        <td className="px-6 py-3 text-gray-500">{inv.shippingBillNo}</td>
-                        <td className="px-6 py-3 text-right font-medium">{formatCurrency(inv.outstanding, inv.currency)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="px-6 py-4 border-t bg-gray-50 flex justify-end">
-                <button onClick={() => setIsFetchInvoiceModalOpen(false)} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium shadow hover:bg-blue-700">Add Selected</button>
-              </div>
-            </div>
-          </div>
-        )}
+      {/* 5. Fetch Invoices Modal - Now a proper component */}
+      {isFetchInvoiceModalOpen && (
+        <FetchInvoiceModal 
+           buyerCode={currentRemittance?.remitterName} 
+           onClose={() => setIsFetchInvoiceModalOpen(false)}
+           onAddInvoices={handleAddInvoices} // <--- PASS HANDLER HERE
+        />
+      )}
 
       </div>
     );
   }
 
   // --- SUB-COMPONENTS (Defined below Main Component) ---
+// --- SUBMIT SETTLEMENT ---
+  const handleSettleSubmit = async (remittance, invoices) => {
+    // 1. Log or Process the data
+    console.log("Settling Remittance:", remittance.remRef);
+    console.log("With Invoices:", invoices);
+
+    // 2. Here you would normally make an API call to save the settlement
+    // await fetch('/api/settle', { method: 'POST', body: ... })
+
+    // 3. Success Feedback
+    setUpdateMessage(`Successfully settled ${invoices.length} invoices for ${remittance.remRef}`);
+    
+    // 4. Close Modals and Cleanup
+    setIsSettleModalOpen(false);
+    setSelectedInvoices([]); // Clear selection
+    
+    // 5. Optional: Refresh data
+    // fetchRemittances(); 
+  };
 
   // FIXED: SettleRemittanceModal now accepts onOpenFetchInvoiceModal
-  const SettleRemittanceModal = ({ remittance, onClose, onSubmit, onOpenFetchInvoiceModal }) => {
-    return (
-      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-        <div className="bg-white w-full max-w-5xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
-          <div className="bg-gray-50 px-6 py-4 border-b flex justify-between items-center">
-            <div>
-              <h3 className="text-xl font-bold text-gray-800">Settle Remittance</h3>
-              <p className="text-sm text-gray-500">{remittance.remRef}</p>
-            </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+  const SettleRemittanceModal = ({ remittance, selectedInvoices = [], onClose, onSubmit, onOpenFetchInvoiceModal }) => {
+  
+  // Calculate total allocated from the selected invoices
+  const totalAllocated = selectedInvoices.reduce((sum, inv) => sum + (inv.amountToSettle || 0), 0);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-5xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+        <div className="bg-gray-50 px-6 py-4 border-b flex justify-between items-center">
+          <div>
+            <h3 className="text-xl font-bold text-gray-800">Settle Remittance</h3>
+            <p className="text-sm text-gray-500">{remittance.remRef}</p>
           </div>
-          
-          <div className="p-6 overflow-y-auto flex-1">
-            {/* Summary Bar */}
-            <div className="flex gap-4 mb-6">
-              <div className="flex-1 bg-blue-50 border border-blue-100 p-4 rounded-lg">
-                <span className="text-xs text-blue-600 font-bold uppercase">Total Amount</span>
-                <div className="text-xl font-bold text-blue-900">{formatCurrency(remittance.net, remittance.currency)}</div>
-              </div>
-              <div className="flex-1 bg-white border p-4 rounded-lg">
-                <span className="text-xs text-gray-500 font-bold uppercase">Charges</span>
-                <div className="text-xl font-bold text-gray-700">{formatCurrency(remittance.charges || 0, remittance.currency)}</div>
-              </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+        </div>
+        
+        <div className="p-6 overflow-y-auto flex-1">
+          {/* Summary Bar */}
+          <div className="flex gap-4 mb-6">
+            <div className="flex-1 bg-blue-50 border border-blue-100 p-4 rounded-lg">
+              <span className="text-xs text-blue-600 font-bold uppercase">Total Net Amount</span>
+              <div className="text-xl font-bold text-blue-900">{formatCurrency(remittance.net, remittance.currency)}</div>
+            </div>
+            <div className="flex-1 bg-green-50 border border-green-100 p-4 rounded-lg">
+              <span className="text-xs text-green-600 font-bold uppercase">Allocated</span>
+              <div className="text-xl font-bold text-green-900">{formatCurrency(totalAllocated, remittance.currency)}</div>
+            </div>
+          </div>
+
+          {/* Settlement Table Area */}
+          <div className="border rounded-lg mb-6">
+            <div className="bg-gray-100 px-4 py-2 border-b flex justify-between items-center">
+              <span className="font-semibold text-sm text-gray-700">Settlement Allocation</span>
+              <button onClick={onOpenFetchInvoiceModal} className="text-blue-600 text-xs font-bold hover:underline">
+                + Fetch Invoices
+              </button>
             </div>
 
-            {/* Settlement Tabs */}
-            <div className="border rounded-lg mb-6">
-              <div className="bg-gray-100 px-4 py-2 border-b flex justify-between items-center">
-                <span className="font-semibold text-sm text-gray-700">Settlement #1</span>
-                <button onClick={onOpenFetchInvoiceModal} className="text-blue-600 text-xs font-bold hover:underline">
-                  + Fetch Invoices
-                </button>
-              </div>
+            {/* CONDITIONAL RENDERING: Check if we have invoices */}
+            {selectedInvoices.length === 0 ? (
               <div className="p-8 text-center text-gray-400 text-sm">
                 No invoices mapped. Click Fetch Invoices to begin.
               </div>
-            </div>
-          </div>
-
-          <div className="bg-gray-50 px-6 py-4 border-t flex justify-end gap-3">
-            <button onClick={onClose} className="px-5 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-100">Cancel</button>
-            <button onClick={() => onSubmit({}, [])} className="px-5 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 shadow-md">Confirm Settlement</button>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-4 py-2">Invoice #</th>
+                      <th className="px-4 py-2">Shipping Bill</th>
+                      <th className="px-4 py-2 text-right">To Settle</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {selectedInvoices.map((inv, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 font-medium">{inv.invoiceNumber}</td>
+                        <td className="px-4 py-2 text-gray-500">{inv.shippingBillNo}</td>
+                        <td className="px-4 py-2 text-right text-blue-600 font-bold">
+                          {formatCurrency(inv.amountToSettle, remittance.currency)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
+
+        <div className="bg-gray-50 px-6 py-4 border-t flex justify-end gap-3">
+          <button onClick={onClose} className="px-5 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-100">Cancel</button>
+          <button 
+            onClick={() => onSubmit(remittance, selectedInvoices)} 
+            disabled={selectedInvoices.length === 0}
+            className={`px-5 py-2 bg-purple-600 text-white rounded-lg font-medium shadow-md ${selectedInvoices.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-purple-700'}`}
+          >
+            Confirm Settlement
+          </button>
+        </div>
       </div>
-    );
+    </div>
+  );
   };
+
+  // ==========================================
+// 5. FETCH INVOICE MODAL (REAL API VERSION)
+// ==========================================
+const FetchInvoiceModal = ({ onClose, onAddInvoices, buyerCode }) => {
+  const [loading, setLoading] = useState(true);
+  const [invoices, setInvoices] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [error, setError] = useState(null);
+
+  // --- FETCH FROM DB ---
+  useEffect(() => {
+    const fetchInvoices = async () => {
+      if (!buyerCode) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        // 👇 CHECK THIS URL: I'm assuming it's /api/invoices based on your other links
+        // We pass buyerCode to only get invoices for THIS specific buyer
+        const response = await fetch(`http://localhost:5000/api/invoices?buyerCode=${encodeURIComponent(buyerCode)}`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch invoices');
+        }
+
+        // className={`whitespace-nowrap py-2 px-4 rounded-lg font-medium text-sm transition-all ${
+        //             activeInvoiceTab === index
+        //               ? "bg-blue-600 text-white shadow-md"
+        //               : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+        //           }`}
+        //         >
+
+        const data = await response.json();
+
+        // Safety: Ensure we have an array
+        if (Array.isArray(data)) {
+          setInvoices(data);
+        } else if (data.invoices && Array.isArray(data.invoices)) {
+          // specific case if your API returns { success: true, invoices: [...] }
+          setInvoices(data.invoices); 
+        } else {
+          setInvoices([]);
+        }
+
+      } catch (err) {
+        console.error("Error fetching invoices:", err);
+        setError("Failed to load invoices. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInvoices();
+  }, [buyerCode]);
+
+  // --- HANDLERS ---
+  const toggleInvoice = (id) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const handleConfirm = () => {
+    // Get the full objects for the IDs selected
+    const selectedList = invoices.filter(inv => selectedIds.has(inv._id || inv.id));
+    
+    // Map them to the format SettleModal expects
+    // We default 'amountToSettle' to the full outstanding amount initially
+    const formattedInvoices = selectedList.map(inv => ({
+      id: inv._id || inv.id,
+      invoiceNumber: inv.invoiceNo || inv.invoiceNumber, // Handle different DB field names
+      shippingBillNo: inv.shippingBillNo || "N/A",
+      total: inv.amount || inv.outstanding || 0,
+      amountToSettle: inv.amount || inv.outstanding || 0, // Default to full amount
+      currency: inv.currency || "USD"
+    }));
+
+    onAddInvoices(formattedInvoices);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-4xl rounded-xl shadow-2xl flex flex-col max-h-[90vh]">
+        
+        {/* Header */}
+        <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
+          <div>
+            <h3 className="text-lg font-bold text-gray-800">Select Invoices</h3>
+            <p className="text-xs text-gray-500">Fetching for Buyer: {buyerCode || "Unknown"}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {loading ? (
+            <div className="flex flex-col justify-center items-center h-40 space-y-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+              <span className="text-gray-500 text-sm">Loading invoices from database...</span>
+            </div>
+          ) : error ? (
+            <div className="text-center text-red-500 py-10 bg-red-50 rounded-lg">
+              {error}
+            </div>
+          ) : invoices.length === 0 ? (
+             <div className="text-center text-gray-400 py-10 border-2 border-dashed rounded-lg">
+               No outstanding invoices found for this buyer.
+             </div>
+          ) : (
+            <table className="w-full text-sm text-left">
+              <thead className="bg-gray-100 text-xs uppercase text-gray-600 sticky top-0">
+                <tr>
+                  <th className="px-4 py-3 w-10">Select</th>
+                  <th className="px-4 py-3">Invoice #</th>
+                  <th className="px-4 py-3">SB Ref</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3 text-right">Outstanding</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {invoices.map((inv) => {
+                  const id = inv._id || inv.id; // Handle MongoDB _id or SQL id
+                  const isSelected = selectedIds.has(id);
+                  return (
+                    <tr 
+                      key={id} 
+                      className={`hover:bg-purple-50 cursor-pointer transition-colors ${isSelected ? 'bg-purple-50' : ''}`}
+                      onClick={() => toggleInvoice(id)}
+                    >
+                      <td className="px-4 py-3">
+                        <input 
+                          type="checkbox" 
+                          checked={isSelected}
+                          onChange={() => toggleInvoice(id)}
+                          className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 border-gray-300"
+                        />
+                      </td>
+                      <td className="px-4 py-3 font-medium text-gray-900">{inv.invoiceNo || inv.invoiceNumber}</td>
+                      <td className="px-4 py-3 text-gray-500">{inv.shippingBillNo || "-"}</td>
+                      <td className="px-4 py-3 text-gray-500">{inv.invoiceDate || inv.date || "-"}</td>
+                      <td className="px-4 py-3 text-right font-bold text-gray-700">
+                        {formatCurrency((inv.amount || inv.outstanding), (inv.currency || "USD"))}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t bg-gray-50 rounded-b-xl flex justify-between items-center">
+          <span className="text-sm text-gray-500">
+            {selectedIds.size} invoice{selectedIds.size !== 1 && 's'} selected
+          </span>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-100">
+              Cancel
+            </button>
+            <button 
+              onClick={handleConfirm}
+              disabled={selectedIds.size === 0}
+              className={`px-6 py-2 rounded-lg text-white font-medium shadow-sm transition-all
+                ${selectedIds.size === 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 hover:shadow-md'}
+              `}
+            >
+              Add Selected
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+};

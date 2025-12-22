@@ -4,7 +4,8 @@ import './globals.css';
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="flex h-screen bg-gray-50">
+      <body className="flex h-screen bg-gray-50"
+      suppressHydrationWarning={true}>
         {/* Sidebar stays fixed on the left */}
         <Sidebar />
 

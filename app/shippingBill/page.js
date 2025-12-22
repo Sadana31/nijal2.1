@@ -4,40 +4,6 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 
 // --- DUMMY DATA ---
 
-// --- MAPPING CONFIGURATION for Citi Bank Upload ---
-const CITI_BANK_UPLOAD_MAPPING = {
-  "Senders Ref.": "senderRefNo",
-  "Message ID": "remRef",
-  "F50-ORG Name": "remitterName",
-  "F58/59-BNF Name": "beneficiaryNameSwift",
-  "Instr. Amount": "net", // Assuming Instr. Amount maps to net value
-  "Instr. Val Date": "remDate", // Needs date parsing/formatting
-  "Instr. Currency": "currency", // Used for the irmLines
-  "Field 70": "remitterRemarks",
-  "Field 72": "detailsOfCharges", // Note: Field 72 might contain more than just charge details
-  "F71A (Details of Charges)": "charges", // Mapping F71A specifically to charges value, needs parsing
-  "F52-OGB Address 1": null, // Not directly mapped currently
-  "F52-OGB Address 2": null, // Not directly mapped currently
-  "F58/59-BNF ANL/Party ID": "beneficiaryBankId",
-};
-
-// --- NEW: MAPPING CONFIGURATION for ICICI Bank Upload ---
-const ICICI_BANK_UPLOAD_MAPPING = {
-  GRSReferenceNo: "remRef",
-  SendersReference: "senderRefNo",
-  OrderingCustomerDetails: "remitterName",
-  BeneficiaryCustomerDetails: "beneficiaryNameSwift", // Needs parsing potentially
-  Amount: "net", // Assume this is net for now, might need adjustment based on Currency
-  USDEquivalent: "usdEquivalent", // Store separately for potential use
-  CreditAdviceValueDate: "remDate", // Parse ISO date
-  ValueDate: "senderRefDate", // Parse ISO date, using this as sender date
-  Currency: "currency",
-  RemittanceInformation: "remitterRemarks",
-  ChargesBorneBy: "detailsOfCharges", // Map 'B', 'R' etc.
-  BeneficiaryCustomer: "beneficiaryBankId", // Use the account number if available
-  // 'instructed' and 'charges' are not directly mapped, will be derived/defaulted
-};
-
 // --- HELPER FUNCTIONS (Moved outside component for initialization) ---
 
 // Helper to format currency or show '-'
@@ -601,277 +567,7 @@ export default function ShippingBillsPage() {
     }
   };
 
-  // --- Citi Bank: Handle Remittance Upload ---
-  const handleUploadSubmit = () => {
-    if (!uploadDataInput) {
-      alert("Please paste data into the text area.");
-      return;
-    }
-
-    const lines = uploadDataInput.trim().split("\n");
-    if (lines.length < 2) {
-      alert("Data must include a header row and at least one data row.");
-      return;
-    }
-
-    const headers = lines[0].split("\t").map((h) => h.trim());
-    const newRemittanceBills = [];
-    let addedCount = 0;
-    let errorCount = 0;
-
-    // Create header index map
-    const headerIndexMap = {};
-    headers.forEach((header, index) => {
-      headerIndexMap[header] = index;
-    });
-
-    // Simple date parsing (assumes DD/MM/YYYY or similar)
-    const parseDate = (dateStr) => {
-      if (!dateStr) return null;
-      // Basic attempt, might need more robust parsing
-      const parts = dateStr.match(/(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
-      if (parts) {
-        // Return in DD-MM-YYYY format
-        return `${parts[1].padStart(2, "0")}-${parts[2].padStart(2, "0")}-${parts[3]}`;
-      }
-      // Try YYYY-MM-DD
-      const partsISO = dateStr.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
-      if (partsISO) {
-        return `${partsISO[3].padStart(2, "0")}-${partsISO[2].padStart(2, "0")}-${partsISO[1]}`;
-      }
-      return dateStr; // Return original if parsing fails
-    };
-
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split("\t").map((v) => v.trim());
-      if (values.length !== headers.length) {
-        console.warn(`Skipping line ${i + 1}: Incorrect number of columns.`);
-        errorCount++;
-        continue;
-      }
-
-      const remData = {};
-      let currency = "USD"; // Default currency
-
-      for (const excelHeader in CITI_BANK_UPLOAD_MAPPING) {
-        const ourField = CITI_BANK_UPLOAD_MAPPING[excelHeader];
-        if (ourField && headerIndexMap[excelHeader] !== undefined) {
-          let value = values[headerIndexMap[excelHeader]];
-
-          // Specific parsing/formatting
-          if (ourField === "remDate" || ourField === "senderRefDate") {
-            value = parseDate(value);
-          } else if (
-            ourField === "net" ||
-            ourField === "charges" ||
-            ourField === "instructed"
-          ) {
-            // Added instructed
-            value = parseFloat(value.replace(/,/g, "")) || 0; // Remove commas and parse
-          } else if (ourField === "currency") {
-            currency = value || "USD"; // Capture currency
-            continue; // Don't add currency directly to top level
-          }
-
-          remData[ourField] = value;
-        }
-      }
-      // Also add instructed amount if not mapped but 'net' is
-      if (remData.net && !remData.instructed) {
-        remData.instructed = remData.net + (remData.charges || 0);
-      }
-
-      // Create a minimal "bill" structure to hold this remittance
-      // Mark it as a manual upload
-      const newBill = {
-        shippingBillNo: `MANUAL-${remData.remRef || Date.now()}`, // Placeholder SB No
-        isManualUpload: true,
-        bankName: "Citi Bank",
-        adCode: "CITI0001",
-        ifscCode: "CITI0000002",
-        buyerName: remData.remitterName, // Add remitter name as buyer name
-        invoiceList: [
-          {
-            // Need invoiceList structure
-            fobcurrencycode: currency, // Store currency here
-            remittanceList: [
-              {
-                ...remData,
-                currency: currency, // Also store currency at remittance level
-                irmLines: [], // Outstanding remittances have no IRM lines yet
-              },
-            ],
-          },
-        ],
-      };
-
-      // Basic validation: Check if remRef exists
-      if (!newBill.invoiceList[0].remittanceList[0].remRef) {
-        console.warn(
-          `Skipping line ${i + 1}: Missing required field 'Message ID' (remRef).`,
-        );
-        errorCount++;
-        continue;
-      }
-
-      newRemittanceBills.push(newBill);
-      addedCount++;
-    }
-
-    if (newRemittanceBills.length > 0) {
-      setAllBills((prevBills) => [...newRemittanceBills, ...prevBills]);
-    }
-
-    let message = `Citi Upload complete: ${addedCount} remittance(s) added.`;
-    if (errorCount > 0) {
-      message += ` ${errorCount} row(s) ignored due to errors (check console).`;
-    }
-    setUpdateMessage(message);
-    setUploadDataInput("");
-    setIsUploadModalOpen(false);
-  };
-
-  // --- NEW: ICICI Bank: Handle Remittance Upload ---
-  const handleICICIUploadSubmit = () => {
-    if (!iciciUploadJsonInput) {
-      alert("Please paste the JSON data into the text area.");
-      return;
-    }
-
-    try {
-      const jsonData = JSON.parse(iciciUploadJsonInput);
-      const assignments = jsonData?.AssignmentDetails?.DTAssignment;
-
-      if (!assignments || !Array.isArray(assignments)) {
-        alert(
-          'Invalid JSON format. Expected "AssignmentDetails.DTAssignment" array.',
-        );
-        return;
-      }
-
-      const newRemittanceBills = [];
-      let addedCount = 0;
-      let errorCount = 0;
-
-      // Date parsing for ISO format (YYYY-MM-DDTHH:mm:ss)
-      const parseISODate = (dateStr) => {
-        if (!dateStr) return null;
-        try {
-          const date = new Date(dateStr);
-          // Return in DD-MM-YYYY format
-          return `${date.getDate().toString().padStart(2, "0")}-${(date.getMonth() + 1).toString().padStart(2, "0")}-${date.getFullYear()}`;
-        } catch (e) {
-          console.warn(`Could not parse date: ${dateStr}`);
-          return dateStr; // Return original if parsing fails
-        }
-      };
-
-      assignments.forEach((item, index) => {
-        const remData = {};
-        let currency = "INR"; // Default, will be overridden
-        let netAmount = 0;
-        let usdEquivalent = 0;
-
-        for (const jsonKey in ICICI_BANK_UPLOAD_MAPPING) {
-          const ourField = ICICI_BANK_UPLOAD_MAPPING[jsonKey];
-          if (
-            ourField &&
-            item[jsonKey] !== undefined &&
-            item[jsonKey] !== null
-          ) {
-            let value = item[jsonKey];
-
-            // Specific parsing/formatting
-            if (ourField === "remDate" || ourField === "senderRefDate") {
-              value = parseISODate(value);
-            } else if (ourField === "net") {
-              netAmount = parseFloat(value.replace(/,/g, "")) || 0;
-              value = netAmount;
-            } else if (ourField === "usdEquivalent") {
-              usdEquivalent = parseFloat(value.replace(/,/g, "")) || 0;
-              value = usdEquivalent; // Store it but continue
-              remData[ourField] = value; // Store usdEquivalent separately
-              continue;
-            } else if (ourField === "currency") {
-              currency = value || "INR";
-            } else if (ourField === "beneficiaryNameSwift") {
-              // Attempt basic parsing: "NAME ACC_NO" -> "NAME"
-              value = value.split(" ")[0] || value; // Take first part
-            } else if (ourField === "beneficiaryBankId") {
-              // Assume BeneficiaryCustomer is the account number or ID needed
-              value = value;
-            }
-
-            remData[ourField] = value;
-          }
-        }
-
-        // Derive instructed and charges (Simplified logic)
-        // Assume 'Amount' is net if currency is INR, otherwise 'Amount' is FCY net
-        if (currency !== "INR") {
-          remData.net = netAmount; // Use Amount as net FCY
-          remData.instructed = netAmount; // Assume instructed is same as net if no charges info
-          remData.charges = 0; // Assume 0 charges
-        } else {
-          // If currency is INR, maybe use USDEquivalent as the FCY amount?
-          remData.net = usdEquivalent; // Use USD equivalent as net FCY
-          remData.instructed = usdEquivalent; // Assume same
-          remData.charges = 0;
-          remData.currency = "USD"; // Override currency to USD
-        }
-
-        // Create placeholder bill
-        const newBill = {
-          shippingBillNo: `MANUAL-${remData.remRef || Date.now() + index}`, // Add index for uniqueness
-          isManualUpload: true,
-          bankName: "ICICI Bank",
-          adCode: "ICIC0001",
-          ifscCode: "ICIC0000001",
-          buyerName: remData.remitterName,
-          invoiceList: [
-            {
-              fobcurrencycode: remData.currency, // Use determined currency
-              remittanceList: [
-                {
-                  ...remData,
-                  currency: remData.currency, // Ensure currency is on remittance too
-                  irmLines: [],
-                },
-              ],
-            },
-          ],
-        };
-
-        // Basic validation
-        if (!newBill.invoiceList[0].remittanceList[0].remRef) {
-          console.warn(
-            `Skipping item ${index + 1}: Missing required field 'GRSReferenceNo' (remRef).`,
-          );
-          errorCount++;
-          return; // Skip this item
-        }
-
-        newRemittanceBills.push(newBill);
-        addedCount++;
-      });
-
-      if (newRemittanceBills.length > 0) {
-        setAllBills((prevBills) => [...newRemittanceBills, ...prevBills]);
-      }
-
-      let message = `ICICI Upload complete: ${addedCount} remittance(s) added.`;
-      if (errorCount > 0) {
-        message += ` ${errorCount} item(s) ignored due to errors (check console).`;
-      }
-      setUpdateMessage(message);
-      setIciciUploadJsonInput(""); // Clear input
-      setIsICICIUploadModalOpen(false); // Close modal
-    } catch (error) {
-      alert("Error parsing JSON.");
-      console.error("JSON Parse Error:", error);
-    }
-  };
-
+  
   // --- NEW: Handle opening the Settle modal ---
   const handleOpenSettleModal = (remittance) => {
     setCurrentRemittance(remittance); // Set the remittance to be settled
@@ -1007,18 +703,60 @@ export default function ShippingBillsPage() {
   };
 
   // --- LODGE/REGULARIZE FLOW (Existing) ---
+  // --- LODGE/REGULARIZE FLOW ---
   const handleOpenLodgeModal = (bill) => {
+    console.log("Opening Lodge Modal for:", bill);
+
+    // 1. Force retrieval of invoices from either key
+    // The API gives 'invoices', the UI usually wants 'invoiceList'
+    const rawInvoices = bill.invoices || bill.invoiceList || [];
+
+    console.log("Found Invoices:", rawInvoices);
+
+    // 2. Map fields specifically for the Modal form
+    const mappedInvoices = rawInvoices.map((inv) => ({
+      // Preserve existing IDs
+      id: inv.id || inv.invoiceid,
+      invoiceno: inv.invoiceno,
+      invoicedate: inv.invoicedate,
+
+      // ⚠️ FORCE MAP: API 'amount' -> Modal 'exportbillvalue'
+      exportbillvalue: inv.exportbillvalue || inv.amount || 0,
+      
+      // ⚠️ FORCE MAP: API 'currency' -> Modal 'fobcurrencycode'
+      fobcurrencycode: inv.fobcurrencycode || inv.currency || "USD",
+
+      // Defaults for form fields
+      tenorasperInvoice: inv.tenorasperInvoice || "",
+      commodityDescription: inv.commodityDescription || "",
+      shippingCompanyName: inv.shippingCompanyName || "",
+      blAWBLRRRNo: inv.blAWBLRRRNo || "",
+      vesselName: inv.vesselName || "",
+      blDate: inv.blDate || null,
+      commercialinvoiceno: inv.commercialinvoiceno || "",
+      
+      // Ensure arrays exist
+      invoiceDocuments: inv.invoiceDocuments || [],
+      blDocuments: inv.blDocuments || [],
+    }));
+
+    // 3. Set the form state with this clean data
     setCurrentBill(bill);
     setLodgeFormState({
       ...bill,
-      buyerName: bill.buyerName || "",
+      // Top level fields
+      buyerName: bill.buyerName || bill.consigneename || "",
       buyerAddress: bill.buyerAddress || "",
       buyerCountryCode: bill.buyerCountryCode || "",
-      buyerCode: bill.buyerCode || "",
+      buyerCode: bill.buyerCode || bill.buyercode || "",
+      
+      // Consignee defaults
       isConsigneeSame: bill.isConsigneeSame || false,
-      consigneeName: bill.consigneeName || "",
+      consigneeName: bill.consigneename || "",
       consigneeAddress: bill.consigneeAddress || "",
       consigneeCountryCode: bill.consigneeCountryCode || "",
+      
+      // Port defaults
       originOfGoods: bill.originOfGoods || "India",
       stateOfOrigin: bill.stateOfOrigin || "",
       portOfLoading: bill.portOfLoading || "",
@@ -1027,12 +765,11 @@ export default function ShippingBillsPage() {
       countryOfDischarge: bill.countryOfDischarge || "",
       portOfFinalDestination: bill.portOfFinalDestination || "",
       countryOfFinalDestination: bill.countryOfFinalDestination || "",
-      invoiceList: (bill.invoiceList || []).map((inv) => ({
-        ...inv,
-        invoiceDocuments: inv.invoiceDocuments || [],
-        blDocuments: inv.blDocuments || [],
-      })),
+
+      // ⚠️ IMPORTANT: Attach the mapped invoices here
+      invoiceList: mappedInvoices, 
     });
+
     setActiveInvoiceTab(0);
     setLodgeModalOpen(true);
   };
@@ -1471,36 +1208,81 @@ export default function ShippingBillsPage() {
     </div>
   );
 
-  // --- DATA FETCHING ---
-  // --- DATA FETCHING ---
+
   useEffect(() => {
     const fetchBills = async () => {
       try {
         setIsLoading(true);
-
-        // 👇 UPDATE THIS URL TO YOUR REAL API
+        // Using your real API endpoint
         const response = await fetch("https://nijal2-1.onrender.com/api/shippingBills");
 
         if (!response.ok) throw new Error("Failed to fetch data");
 
         const jsonResponse = await response.json();
-
-        // 1. Get the array from the "data" key
+        
         const apiData = jsonResponse.data || [];
 
-        // 2. No Renaming - Just add essential UI flags
-        const rawBills = apiData.map((bill) => ({
-          ...bill, // Keep all API keys exactly as they are (shippingbillno, invoices, etc.)
+        // 2. Map API data to Frontend Structure
+        const rawBills = apiData.map((bill) => {
+          
+          // --- INTERNAL HELPER: Map the invoice fields ---
+          // This ensures the modal gets exactly the keys it expects (camelCase etc)
+          const mappedInvoices = (bill.invoices || []).map(inv => ({
+            id: inv.invoiceid,
+            
+            // Map keys for the Lodge Modal Form:
+            invoiceno: inv.invoiceno,
+            invoicedate: inv.invoicedate,
+            exportbillvalue: inv.amount,     // 👈 Modal expects 'exportbillvalue', API gives 'amount'
+            fobcurrencycode: inv.currency,   // 👈 Modal expects 'fobcurrencycode', API gives 'currency'
+            
+            // Keep originals just in case
+            amount: inv.amount,
+            currency: inv.currency,
+            status: inv.status,
+            
+            // Add DEFAULTS so the form doesn't crash on nulls
+            tenorasperInvoice: "",
+            commodityDescription: "",
+            shippingCompanyName: "",
+            blAWBLRRRNo: "",
+            vesselName: "",
+            blDate: null,
+            invoiceDocuments: [],
+            blDocuments: [],
+            remittanceList: []
+          }));
 
-          // Add these two defaults so your Filters don't crash
-          bankName: bill.bankname || "Unknown Bank",
-          isManualUpload: false,
+          return {
+            // Map top-level Shipping Bill fields
+            shippingBillNo: bill.shippingbillno, // camelCase for UI
+            shippingbillno: bill.shippingbillno, // lowercase for safety
+            
+            shippingBillDate: bill.shippingbilldate,
+            shippingdate: bill.shippingbilldate,
+            
+            portCode: bill.portcode,
+            
+            // ⚠️ CRITICAL: The main table looks for 'consigneename'
+            consigneename: bill.consigneename, 
+            buyerName: bill.consigneename,
+            buyerCode: bill.buyercode || "N/A",
+            
+            lodgementno: bill.lodgementno,
+            lodgementdate: bill.lodgementdate, // Ensure this passes through if it exists
+            
+            bankName: "ICICI Bank", // Hardcoded default for filtering
+            isManualUpload: false,
+            
+            // ⚠️ THE FIX: Provide BOTH keys ⚠️
+            invoices: mappedInvoices,    // For the Main Table View
+            invoiceList: mappedInvoices, // For the Lodge Modal Logic
+          };
+        });
 
-          // Ensure invoices array exists
-          invoices: bill.invoices || [],
-        }));
-
+        console.log("Mapped Data:", rawBills); // Check console to verify invoiceList exists!
         setAllBills(rawBills);
+        
       } catch (err) {
         console.error("Error fetching bills:", err);
         setError(err.message);
@@ -1511,7 +1293,6 @@ export default function ShippingBillsPage() {
 
     fetchBills();
   }, []);
-
   // --- HANDLE ESCAPE KEY ---
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -2177,374 +1958,417 @@ export default function ShippingBillsPage() {
         </div>
       )}
       {isLodgeModalOpen && lodgeFormState && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-20 z-50 flex items-center justify-center p-4">
-          <div className="relative w-full max-w-4xl bg-white rounded-xl shadow-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <h3 className="text-xl font-bold text-gray-900 mb-4">
-                Lodge/Regularize SB: {lodgeFormState.shippingBillNo}
-              </h3>
-              <div className="p-4 border rounded-lg bg-gray-50 mb-6">
-                <h4 className="font-semibold text-gray-800 mb-3">
-                  Shipping Bill Details
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  <div className="col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4 border-t pt-4 mt-2">
-                    <div>
-                      <label className="block font-medium">Buyer Code</label>
-                      <input
-                        type="text"
-                        name="buyerCode"
-                        value={lodgeFormState.buyerCode || ""}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">Buyer Name</label>
-                      <input
-                        type="text"
-                        name="buyerName"
-                        value={lodgeFormState.buyerName}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">Buyer Address</label>
-                      <input
-                        type="text"
-                        name="buyerAddress"
-                        value={lodgeFormState.buyerAddress}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">
-                        Buyer Country Code
-                      </label>
-                      <input
-                        type="text"
-                        name="buyerCountryCode"
-                        value={lodgeFormState.buyerCountryCode}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                  </div>
-                  <div className="col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4 border-t pt-4 mt-2">
-                    <div className="md:col-span-3 flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        name="isConsigneeSame"
-                        checked={lodgeFormState.isConsigneeSame}
-                        onChange={handleLodgeFormChange}
-                        className="rounded"
-                        id="consigneeCheck"
-                      />
-                      <label htmlFor="consigneeCheck">
-                        Consignee same as buyer
-                      </label>
-                    </div>
-                    <div>
-                      <label className="block font-medium">
-                        Consignee Name
-                      </label>
-                      <input
-                        type="text"
-                        name="consigneeName"
-                        value={lodgeFormState.consigneeName}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">
-                        Consignee Address
-                      </label>
-                      <input
-                        type="text"
-                        name="consigneeAddress"
-                        value={lodgeFormState.consigneeAddress}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">
-                        Consignee Country Code
-                      </label>
-                      <input
-                        type="text"
-                        name="consigneeCountryCode"
-                        value={lodgeFormState.consigneeCountryCode}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                  </div>
-                  <div className="col-span-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 border-t pt-4 mt-2">
-                    <div>
-                      <label className="block font-medium">
-                        Origin of Goods
-                      </label>
-                      <input
-                        type="text"
-                        name="originOfGoods"
-                        value={lodgeFormState.originOfGoods}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">
-                        State of Origin
-                      </label>
-                      <input
-                        type="text"
-                        name="stateOfOrigin"
-                        value={lodgeFormState.stateOfOrigin || ""}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">
-                        Port of Loading
-                      </label>
-                      <input
-                        type="text"
-                        name="portOfLoading"
-                        value={lodgeFormState.portOfLoading || ""}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">
-                        Port of Discharge
-                      </label>
-                      <input
-                        type="text"
-                        name="portOfDischarge"
-                        value={lodgeFormState.portOfDischarge || ""}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">
-                        Country of Discharge
-                      </label>
-                      <input
-                        type="text"
-                        name="countryOfDischarge"
-                        value={lodgeFormState.countryOfDischarge || ""}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                  </div>
-                  <div className="col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4 border-t pt-4 mt-2">
-                    <div>
-                      <label className="block font-medium">
-                        Port of Final Destination
-                      </label>
-                      <input
-                        type="text"
-                        name="portOfFinalDestination"
-                        value={lodgeFormState.portOfFinalDestination || ""}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-medium">
-                        Country of Final Destination
-                      </label>
-                      <input
-                        type="text"
-                        name="countryOfFinalDestination"
-                        value={lodgeFormState.countryOfFinalDestination || ""}
-                        onChange={handleLodgeFormChange}
-                        className="mt-1 p-2 w-full border rounded-md"
-                      />
-                    </div>
-                  </div>
-                </div>
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-md    bg-gray-200 ">
+    <div className="relative w-full max-w-4xl bg-white rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col">
+      
+      {/* Header */}
+      <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center sticky top-0 z-10">
+        <h3 className="text-xl font-bold text-gray-900">
+          Lodge/Regularize SB: <span className="text-blue-600">{lodgeFormState.shippingbilno}</span>
+        </h3>
+        <button 
+          onClick={() => setLodgeModalOpen(false)}
+          className="text-gray-400 hover:text-gray-600 text-2xl font-bold"
+        >
+          &times;
+        </button>
+      </div>
+
+      <div className="p-6 space-y-6">
+        
+        {/* --- SECTION 1: SHIPPING BILL DETAILS --- */}
+        <div className="p-5 border rounded-xl bg-white shadow-sm ring-1 ring-gray-100">
+          <h4 className="font-bold text-gray-800 mb-4 border-b pb-2 text-sm uppercase tracking-wide">
+            Shipping Bill Details
+          </h4>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-sm">
+            {/* Row 1: Buyer Info */}
+            <div className="col-span-3 grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Buyer Code</label>
+                <input
+                  type="text"
+                  name="buyerCode"
+                  value={lodgeFormState.buyerCode || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                />
               </div>
               <div>
-                <h4 className="font-semibold text-gray-800 mb-3">
-                  Invoice Details
-                </h4>
-                <div className="border-b">
-                  <nav className="-mb-px flex space-x-4">
-                    {(lodgeFormState.invoiceList || []).map((inv, index) => (
-                      <button
-                        key={index}
-                        onClick={() => setActiveInvoiceTab(index)}
-                        className={`${activeInvoiceTab === index ? "border-blue-500 text-blue-600" : "border-transparent text-gray-500"} py-2 px-3 border-b-2 font-medium text-sm`}
-                      >
-                        Invoice {index + 1}
-                      </button>
-                    ))}
-                  </nav>
+                <label className="block font-medium text-gray-700 mb-1">Buyer Name</label>
+                <input
+                  type="text"
+                  name="buyerName"
+                  value={lodgeFormState.buyerName || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Buyer Address</label>
+                <input
+                  type="text"
+                  name="buyerAddress"
+                  value={lodgeFormState.buyerAddress || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Buyer Country Code</label>
+                <input
+                  type="text"
+                  name="buyerCountryCode"
+                  value={lodgeFormState.buyerCountryCode || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                />
+              </div>
+            </div>
+
+            {/* Row 2: Consignee Info */}
+            <div className="col-span-3 border-t pt-4 mt-2">
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="checkbox"
+                  name="isConsigneeSame"
+                  checked={lodgeFormState.isConsigneeSame}
+                  onChange={handleLodgeFormChange}
+                  className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                  id="consigneeCheck"
+                />
+                <label htmlFor="consigneeCheck" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                  Consignee same as buyer
+                </label>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div>
+                  <label className="block font-medium text-gray-700 mb-1">Consignee Name</label>
+                  <input
+                    type="text"
+                    name="consigneeName"
+                    value={lodgeFormState.consigneeName || ""}
+                    onChange={handleLodgeFormChange}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                  />
                 </div>
-                <div className="p-4 border border-t-0 rounded-b-lg">
-                  {(lodgeFormState.invoiceList || []).map((inv, index) => (
-                    <div
-                      key={index}
-                      className={
-                        activeInvoiceTab === index ? "block" : "hidden"
-                      }
-                    >
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <p className="font-medium text-gray-500">
-                            Invoice No.
-                          </p>
-                          <p>{inv.invoiceno}</p>
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-500">
-                            Invoice Date
-                          </p>
-                          <p>{inv.invoicedate}</p>
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-500">FOB Value</p>
-                          <p>
-                            {inv.fobcurrencycode} {inv.exportbillvalue}
-                          </p>
-                        </div>
-                        <div>
-                          <label className="block font-medium">Tenor</label>
-                          <input
-                            type="text"
-                            name="tenorasperInvoice"
-                            value={inv.tenorasperInvoice || ""}
-                            onChange={(e) => handleInvoiceFormChange(index, e)}
-                            className="mt-1 p-2 w-full border rounded-md"
-                          />
-                        </div>
-                        <div>
-                          <label className="block font-medium">Commodity</label>
-                          <input
-                            type="text"
-                            name="commodityDescription"
-                            value={inv.commodityDescription || ""}
-                            onChange={(e) => handleInvoiceFormChange(index, e)}
-                            className="mt-1 p-2 w-full border rounded-md"
-                          />
-                        </div>
-                        <div>
-                          <label className="block font-medium">
-                            Shipping Co.
-                          </label>
-                          <input
-                            type="text"
-                            name="shippingCompanyName"
-                            value={inv.shippingCompanyName || ""}
-                            onChange={(e) => handleInvoiceFormChange(index, e)}
-                            className="mt-1 p-2 w-full border rounded-md"
-                          />
-                        </div>
-                        <div>
-                          <label className="block font-medium">
-                            BL/AWB No.
-                          </label>
-                          <input
-                            type="text"
-                            name="blAWBLRRRNo"
-                            value={inv.blAWBLRRRNo || ""}
-                            onChange={(e) => handleInvoiceFormChange(index, e)}
-                            className="mt-1 p-2 w-full border rounded-md"
-                          />
-                        </div>
-                        <div>
-                          <label className="block font-medium">
-                            Vessel Name
-                          </label>
-                          <input
-                            type="text"
-                            name="vesselName"
-                            value={inv.vesselName || ""}
-                            onChange={(e) => handleInvoiceFormChange(index, e)}
-                            className="mt-1 p-2 w-full border rounded-md"
-                          />
-                        </div>
-                        <div>
-                          <label className="block font-medium">BL Date</label>
-                          <DatePicker
-                            selectedDate={inv.blDate}
-                            onChange={(date) =>
-                              handleInvoiceFormChange(index, {
-                                target: { name: "blDate", value: date },
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <label className="block font-medium">
-                            Comm. Inv. No.
-                          </label>
-                          <input
-                            type="text"
-                            name="commercialinvoiceno"
-                            value={inv.commercialinvoiceno || ""}
-                            onChange={(e) => handleInvoiceFormChange(index, e)}
-                            className="mt-1 p-2 w-full border rounded-md"
-                          />
-                        </div>
-                        <div className="col-span-3 grid grid-cols-2 gap-4 pt-4 border-t">
-                          <DocumentUploader
-                            docType="invoiceDocuments"
-                            invoiceIndex={index}
-                            onFileChange={handleFileChange}
-                            files={inv.invoiceDocuments || []}
-                            label="Invoice Documents"
-                            onViewFile={handleViewFile}
-                          />
-                          <DocumentUploader
-                            docType="blDocuments"
-                            invoiceIndex={index}
-                            onFileChange={handleFileChange}
-                            files={inv.blDocuments || []}
-                            label="BL Documents"
-                            onViewFile={handleViewFile}
-                          />
-                        </div>
-                      </div>
-                      {index > 0 && (
-                        <button
-                          onClick={() => handlePrefillInvoice(index)}
-                          className="mt-4 text-sm text-blue-600 hover:underline"
-                        >
-                          Pre-fill from Invoice 1
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                <div>
+                  <label className="block font-medium text-gray-700 mb-1">Consignee Address</label>
+                  <input
+                    type="text"
+                    name="consigneeAddress"
+                    value={lodgeFormState.consigneeAddress || ""}
+                    onChange={handleLodgeFormChange}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-gray-700 mb-1">Consignee Country Code</label>
+                  <input
+                    type="text"
+                    name="consigneeCountryCode"
+                    value={lodgeFormState.consigneeCountryCode || ""}
+                    onChange={handleLodgeFormChange}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                  />
                 </div>
               </div>
-              <div className="flex justify-end gap-4 mt-6">
-                <button
-                  onClick={() => setLodgeModalOpen(false)}
-                  className="px-4 py-2 bg-gray-200 rounded-md"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleLodgeSubmit}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md"
-                >
-                  Submit
-                </button>
+            </div>
+
+            {/* Row 3: Port & Origin Details */}
+            <div className="col-span-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 border-t pt-4 mt-2">
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Origin of Goods</label>
+                <input
+                  type="text"
+                  name="originOfGoods"
+                  value={lodgeFormState.originOfGoods || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">State of Origin</label>
+                <input
+                  type="text"
+                  name="stateOfOrigin"
+                  value={lodgeFormState.stateOfOrigin || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Port of Loading</label>
+                <input
+                  type="text"
+                  name="portOfLoading"
+                  value={lodgeFormState.portOfLoading || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Port of Discharge</label>
+                <input
+                  type="text"
+                  name="portOfDischarge"
+                  value={lodgeFormState.portOfDischarge || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Country of Discharge</label>
+                <input
+                  type="text"
+                  name="countryOfDischarge"
+                  value={lodgeFormState.countryOfDischarge || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Port of Final Destination</label>
+                <input
+                  type="text"
+                  name="portOfFinalDestination"
+                  value={lodgeFormState.portOfFinalDestination || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-gray-700 mb-1">Country of Final Destination</label>
+                <input
+                  type="text"
+                  name="countryOfFinalDestination"
+                  value={lodgeFormState.countryOfFinalDestination || ""}
+                  onChange={handleLodgeFormChange}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                />
               </div>
             </div>
           </div>
         </div>
-      )}
+
+        {/* --- SECTION 2: INVOICE DETAILS (FIXED LAYOUT) --- */}
+        <div className="p-5 border rounded-xl bg-white shadow-sm ring-1 ring-gray-100">
+          <div className="flex justify-between items-center mb-4 border-b pb-2">
+            <h4 className="font-bold text-gray-800 text-sm uppercase tracking-wide">
+              Invoice Details
+            </h4>
+            <span className="text-xs font-medium bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+              {lodgeFormState.invoiceList?.length || 0} Invoice(s)
+            </span>
+          </div>
+
+          {/* Invoice Tabs */}
+          <div className="mb-6 overflow-x-auto">
+            <nav className="flex space-x-2 pb-1">
+              {(lodgeFormState.invoiceList || []).map((inv, index) => (
+                <button
+                  key={index}
+                  onClick={() => setActiveInvoiceTab(index)}
+                  type="button"
+                  className={`whitespace-nowrap py-2 px-4 rounded-lg font-medium text-sm transition-all ${
+                    activeInvoiceTab === index
+                      ? "bg-blue-600 text-white shadow-md"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  Invoice #{index + 1}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Invoice Fields Container */}
+          <div>
+            {(lodgeFormState.invoiceList || []).map((inv, index) => (
+              <div
+                key={index}
+                className={activeInvoiceTab === index ? "block" : "hidden"}
+              >
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-sm">
+                  
+                  {/* Read-Only Info Fields (Styled as inputs for alignment) */}
+                  <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Invoice No.</label>
+                    <input
+                      type="text"
+                      value={inv.invoiceno || ""}
+                      disabled
+                      className="w-full bg-transparent font-semibold text-gray-800 border-none p-0 focus:ring-0"
+                    />
+                  </div>
+                  
+                  <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Invoice Date</label>
+                    <input
+                      type="text"
+                      value={inv.invoicedate || ""}
+                      disabled
+                      className="w-full bg-transparent font-semibold text-gray-800 border-none p-0 focus:ring-0"
+                    />
+                  </div>
+
+                  <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                    <label className="block text-xs font-bold text-blue-600 uppercase mb-1">FOB Value</label>
+                    <input
+                      type="text"
+                      value={`${inv.fobcurrencycode || ""} ${inv.exportbillvalue || ""}`}
+                      disabled
+                      className="w-full bg-transparent font-bold text-blue-900 border-none p-0 focus:ring-0"
+                    />
+                  </div>
+
+                  {/* Editable Input Fields */}
+                  <div>
+                    <label className="block font-medium text-gray-700 mb-1">Tenor</label>
+                    <input
+                      type="text"
+                      name="tenorasperInvoice"
+                      value={inv.tenorasperInvoice || ""}
+                      onChange={(e) => handleInvoiceFormChange(index, e)}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition-all"
+                      placeholder="e.g. 90 Days"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-gray-700 mb-1">Commodity</label>
+                    <input
+                      type="text"
+                      name="commodityDescription"
+                      value={inv.commodityDescription || ""}
+                      onChange={(e) => handleInvoiceFormChange(index, e)}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-gray-700 mb-1">Shipping Co.</label>
+                    <input
+                      type="text"
+                      name="shippingCompanyName"
+                      value={inv.shippingCompanyName || ""}
+                      onChange={(e) => handleInvoiceFormChange(index, e)}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-gray-700 mb-1">BL/AWB No.</label>
+                    <input
+                      type="text"
+                      name="blAWBLRRRNo"
+                      value={inv.blAWBLRRRNo || ""}
+                      onChange={(e) => handleInvoiceFormChange(index, e)}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-gray-700 mb-1">Vessel Name</label>
+                    <input
+                      type="text"
+                      name="vesselName"
+                      value={inv.vesselName || ""}
+                      onChange={(e) => handleInvoiceFormChange(index, e)}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-gray-700 mb-1">BL Date</label>
+                    <div className="w-full">
+                      <DatePicker
+                        selectedDate={inv.blDate}
+                        onChange={(date) =>
+                          handleInvoiceFormChange(index, {
+                            target: { name: "blDate", value: date },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-gray-700 mb-1">Comm. Inv. No.</label>
+                    <input
+                      type="text"
+                      name="commercialinvoiceno"
+                      value={inv.commercialinvoiceno || ""}
+                      onChange={(e) => handleInvoiceFormChange(index, e)}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Documents Section */}
+                <div className="mt-8 pt-6 border-t border-gray-100">
+                  <h5 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Required Documents</h5>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <DocumentUploader
+                      docType="invoiceDocuments"
+                      invoiceIndex={index}
+                      onFileChange={handleFileChange}
+                      files={inv.invoiceDocuments || []}
+                      label="Commercial Invoice File"
+                      onViewFile={handleViewFile}
+                    />
+                    <div className="border-l border-gray-200 pl-6 md:pl-6">
+                        <DocumentUploader
+                        docType="blDocuments"
+                        invoiceIndex={index}
+                        onFileChange={handleFileChange}
+                        files={inv.blDocuments || []}
+                        label="BL / AWB File"
+                        onViewFile={handleViewFile}
+                        />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pre-fill Button */}
+                {index > 0 && (
+                  <div className="mt-6 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => handlePrefillInvoice(index)}
+                      className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition-colors font-medium"
+                    >
+                      <span>📋</span> Copy details from Invoice 1
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </div>
+
+      {/* Footer Actions */}
+      <div className="bg-gray-50 px-6 py-4 border-t flex justify-end gap-3 sticky bottom-0 z-10">
+        <button
+          onClick={() => setLodgeModalOpen(false)}
+          className="px-5 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 shadow-sm transition-all"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleLodgeSubmit}
+          className="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 shadow-md hover:shadow-lg transition-all"
+        >
+          Submit Lodgement
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       {isRemittanceModalOpen && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75 z-50 flex items-center justify-center">
           <div className="relative p-6 border w-full max-w-md shadow-lg rounded-xl bg-white">
@@ -2599,7 +2423,7 @@ export default function ShippingBillsPage() {
 
       {/* Double Click Modal */}
       {isDoubleClickModalOpen && currentBill && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 backdrop-blur-md bg-gray-200 overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4">
           <div className="relative mx-auto border w-full max-w-6xl shadow-lg rounded-xl bg-white">
             <div className="p-6 max-h-[90vh] overflow-y-auto">
               <button
@@ -2609,7 +2433,7 @@ export default function ShippingBillsPage() {
                 &times;
               </button>
               <h3 className="text-xl leading-6 font-bold text-gray-900 mb-6">
-                Shipping Bill Details: {currentBill.shippingBillNo}
+                Shipping Bill Details: {currentBill.shippingbillno}
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-6">
@@ -2620,11 +2444,11 @@ export default function ShippingBillsPage() {
                   <div className="space-y-1">
                     <DetailItemLR
                       label="Buyer Code"
-                      value={currentBill.buyerCode}
+                      value={currentBill.buyercode}
                     />
                     <DetailItemLR
                       label="Buyer Name"
-                      value={currentBill.buyerName}
+                      value={currentBill.consigneename}
                     />
                     <DetailItemLR
                       label="Buyer Address"
@@ -2632,12 +2456,12 @@ export default function ShippingBillsPage() {
                     />
                     <DetailItemLR
                       label="Buyer Country"
-                      value={currentBill.buyerCountryCode}
+                      value={currentBill.consigneecountrycode}
                     />
                     <hr className="my-1" />
                     <DetailItemLR
                       label="Consignee Name"
-                      value={currentBill.consigneeName}
+                      value={currentBill.consigneename}
                     />
                     <DetailItemLR
                       label="Consignee Address"
@@ -2645,7 +2469,7 @@ export default function ShippingBillsPage() {
                     />
                     <DetailItemLR
                       label="Consignee Country"
-                      value={currentBill.consigneeCountryCode}
+                      value={currentBill.consigneecountrycode}
                     />
                   </div>
                 </div>
@@ -2656,22 +2480,22 @@ export default function ShippingBillsPage() {
                   <div className="space-y-1">
                     <DetailItemLR
                       label="SB No."
-                      value={currentBill.shippingBillNo}
+                      value={currentBill.shippingbillno}
                     />
                     <DetailItemLR
                       label="SB Date"
                       value={
-                        currentBill.shippingBillDate || currentBill.shippingDate
+                        currentBill.shippingbilldate || currentBill.shippingDate
                       }
                     />
                     <DetailItemLR
                       label="Port Code"
-                      value={currentBill.portCode}
+                      value={currentBill.portcode}
                     />
                     <DetailItemLR label="IE Code" value={currentBill.ieCode} />
                     <DetailItemLR
                       label="Due Date"
-                      value={currentBill.dueDate}
+                      value={currentBill.duedate}
                     />
                   </div>
                 </div>
@@ -2711,7 +2535,7 @@ export default function ShippingBillsPage() {
                       <button
                         key={tab}
                         onClick={() => setActiveDetailTab(tab)}
-                        className={`${activeDetailTab === tab ? "border-blue-500 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm`}
+                        className={`${activeDetailTab === tab ? "border-blue-500 text-blue-600 " : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm`}
                       >
                         {tab}
                       </button>
@@ -2884,7 +2708,12 @@ export default function ShippingBillsPage() {
                                 setActiveInvoiceIndexInModal(index); // NEW: Sync state
                                 setPendingRemittances([]); // Clear pending when switching tabs
                               }}
-                              className={`${activeCustomInvoiceSubTab === index ? "border-blue-500 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-600"} whitespace-nowrap pb-2 px-1 border-b-2 font-medium text-xs`}
+                              // className={`${activeCustomInvoiceSubTab === index ? "border-blue-500 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-600"} whitespace-nowrap pb-2 px-1 border-b-2 font-medium text-xs`}
+                              className={`whitespace-nowrap py-2 px-4 rounded-lg font-medium text-sm transition-all ${
+                    activeCustomInvoiceSubTab === index
+                      ? "bg-blue-200 text-gray shadow-md"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
                             >
                               Invoice {index + 1} ({inv.invoiceno})
                             </button>
