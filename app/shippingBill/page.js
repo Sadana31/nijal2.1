@@ -1958,7 +1958,7 @@ export default function ShippingBillsPage() {
         </div>
       )}
       {isLodgeModalOpen && lodgeFormState && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-md    bg-gray-200 ">
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm  bg-black/50 z-50">
     <div className="relative w-full max-w-4xl bg-white rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col">
       
       {/* Header */}
@@ -2049,7 +2049,7 @@ export default function ShippingBillsPage() {
                   <input
                     type="text"
                     name="consigneeName"
-                    value={lodgeFormState.consigneeName || ""}
+                    value={lodgeFormState.consigneename || ""}
                     onChange={handleLodgeFormChange}
                     className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                   />
@@ -2069,7 +2069,7 @@ export default function ShippingBillsPage() {
                   <input
                     type="text"
                     name="consigneeCountryCode"
-                    value={lodgeFormState.consigneeCountryCode || ""}
+                    value={lodgeFormState.consigneecountrycode || ""}
                     onChange={handleLodgeFormChange}
                     className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                   />
@@ -2423,7 +2423,7 @@ export default function ShippingBillsPage() {
 
       {/* Double Click Modal */}
       {isDoubleClickModalOpen && currentBill && (
-        <div className="fixed inset-0 backdrop-blur-md bg-gray-200 overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 backdrop-blur-sm  bg-black/50 z-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4">
           <div className="relative mx-auto border w-full max-w-6xl shadow-lg rounded-xl bg-white">
             <div className="p-6 max-h-[90vh] overflow-y-auto">
               <button
@@ -2492,7 +2492,7 @@ export default function ShippingBillsPage() {
                       label="Port Code"
                       value={currentBill.portcode}
                     />
-                    <DetailItemLR label="IE Code" value={currentBill.ieCode} />
+                    <DetailItemLR label="IE Code" value={currentBill.iecode} />
                     <DetailItemLR
                       label="Due Date"
                       value={currentBill.duedate}
